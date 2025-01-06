@@ -1,0 +1,519 @@
+---
+title: "English Premier League 2022-2023"
+author: "Jan Zumwald"
+output: html_notebook
+---
+
+Libraries laden
+```{r}
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(ggrepel)
+```
+
+Daten importieren
+```{r}
+epl <- data.frame(read.csv("data/Premier_League.csv"))
+head(epl)
+```
+```{r}
+str(epl)
+```
+```{r}
+epl$datetime <- paste(epl$date, epl$clock)
+epl$datetime <- dmy_hm(epl$datetime)
+epl$year <- year(epl$datetime)
+epl$month <- month(epl$datetime)
+epl$day <- day(epl$datetime)
+epl$hour <- hour(epl$datetime)
+epl$minute <- minute(epl$datetime)
+
+epl$attendance <- gsub(",", "", epl$attendance)
+epl$attendance <- as.numeric(epl$attendance)
+
+colnames(epl) <- c("Datum", "Uhrzeit", "Stadion", "Zuschauer", "Heimteam", "Tore_Heim", "Auswärtsteam", "Tore_Auswärts", "Ballbesitz_Heim", "Ballbesitz_Auswärts", "Schüsse_Heim", "Schüsse_Auswärts", "Torschüsse_Heim", "Torschüsse_Auswärts", "Fehlschüsse_Heim", "Fehlschüsse_Auswärts", "Blockiert_Heim", "Blockiert_Auswärts", "Passgenauigkeit_Heim", "Passgenauigkeit_Auswärts", "Chancen_Heim", "Chancen_Auswärts", "Ecken_Heim", "Ecken_Auswärts", "Abseits_Heim", "Abseits_Auswärts", "Tackles_Heim", "Tackles_Auswärts", "Duelle_Heim", "Duelle_Auswärts", "Paraden_Heim", "Paraden_Auswärts", "Fouls_Heim", "Fouls_Auswärts", "Gelbe_Karten_Heim", "Gelbe_Karten_Auswärts", "Rote_Karten_Heim", "Rote_Karten_Auswärts", "Link", "Datum_Uhrzeit", "Jahr", "Monat", "Tag", "Stunde", "Minute")
+
+epl$Tordiff_Heim <- epl$Tore_Heim - epl$Tore_Auswärts
+epl$Tordiff_Auswärts <- epl$Tore_Auswärts - epl$Tore_Heim
+epl$Punkte_Heim <- ifelse(epl$Tordiff_Heim > 0, 3, ifelse(epl$Tordiff_Heim == 0, 1, 0))
+epl$Punkte_Auswärts <- ifelse(epl$Tordiff_Heim < 0, 3, ifelse(epl$Tordiff_Heim == 0, 1, 0))
+
+```
+
+```{r}
+# Identifizieren Sie die Zeilen mit NA-Werten
+rows_with_na <- epl[!complete.cases(epl), ]
+
+# Zeigen Sie die Zeilen mit NA-Werten an
+print(rows_with_na)
+
+```
+```{r}
+summary(epl)
+```
+```{r}
+# Zusammenfassung der Fouls und Gelben Karten für Heim- und Auswärtsspiele
+summary_heim <- epl %>%
+  group_by(Heimteam) %>%
+  summarize(
+    Siege_Heim = sum(Punkte_Heim == 3),
+    Unentsch_Heim = sum(Punkte_Heim == 1),
+    Niederl_Heim = sum(Punkte_Heim == 0),
+    Gesamt_Tore_Heim = sum(Tore_Heim),
+    Gesamt_Gegentore_Heim = sum(Tore_Auswärts),
+    Gesamt_Tordiff_Heim = sum(Tordiff_Heim),
+    Durchschnitt_Ballbesitz_Heim = mean(Ballbesitz_Heim),
+    Durchschnitt_Passgenauigkeit_Heim = mean(Passgenauigkeit_Heim),
+    Gesamt_Punkte_Heim = sum(Punkte_Heim),
+    Gesamt_Fouls_Heim = sum(Fouls_Heim),
+    Gesamt_Gelbe_Karten_Heim = sum(Gelbe_Karten_Heim)
+  )
+
+summary_auswärts <- epl %>%
+  group_by(Auswärtsteam) %>%
+  summarize(
+    Siege_Auswärts = sum(Punkte_Auswärts == 3),
+    Unentschieden_Auswärts = sum(Punkte_Auswärts == 1),
+    Niederlagen_Auswärts = sum(Punkte_Auswärts == 0),
+    Gesamt_Tore_Auswärts = sum(Tore_Auswärts),
+    Gesamt_Gegentore_Auswärts = sum(Tore_Heim),
+    Gesamt_Tordifferenz_Auswärts = sum(Tordiff_Auswärts),
+    Durchschnitt_Ballbesitz_Auswärts = mean(Ballbesitz_Auswärts),
+    Durchschnitt_Passgenauigkeit_Auswärts = mean(Passgenauigkeit_Auswärts),
+    Gesamt_Punkte_Auswärts = sum(Punkte_Auswärts),
+    Gesamt_Fouls_Auswärts = sum(Fouls_Auswärts),
+    Gesamt_Gelbe_Karten_Auswärts = sum(Gelbe_Karten_Auswärts)
+  )
+
+# Zusammenführen der beiden Zusammenfassungstabellen nach den Teamnamen
+combined_summary <- merge(summary_heim, summary_auswärts, by.x = "Heimteam", by.y = "Auswärtsteam", all = TRUE)
+
+# Summieren der Paare von Spalten und Erstellen der Durchschnittswerte
+combined_summary$Siege <- combined_summary$Siege_Heim + combined_summary$Siege_Auswärts
+combined_summary$Unentschieden <- combined_summary$Unentsch_Heim + combined_summary$Unentschieden_Auswärts
+combined_summary$Niederlagen <- combined_summary$Niederl_Heim + combined_summary$Niederlagen_Auswärts
+combined_summary$Tore <- combined_summary$Gesamt_Tore_Heim + combined_summary$Gesamt_Tore_Auswärts
+combined_summary$Gegentore <- combined_summary$Gesamt_Gegentore_Heim + combined_summary$Gesamt_Gegentore_Auswärts
+combined_summary$Tordiff <- combined_summary$Gesamt_Tordiff_Heim + combined_summary$Gesamt_Tordifferenz_Auswärts
+combined_summary$Durchschnitt_Ballbesitz <- (combined_summary$Durchschnitt_Ballbesitz_Heim + combined_summary$Durchschnitt_Ballbesitz_Auswärts) / 2
+combined_summary$Durchschnitt_Passgenauigkeit <- (combined_summary$Durchschnitt_Passgenauigkeit_Heim + combined_summary$Durchschnitt_Passgenauigkeit_Auswärts) / 2
+combined_summary$Gesamt_Punkte <- combined_summary$Gesamt_Punkte_Heim + combined_summary$Gesamt_Punkte_Auswärts
+
+# Berechnung der Durchschnittlichen Fouls und Gelben Karten pro Spiel (bei 38 Spielen pro Team)
+combined_summary$Durchschnitt_Fouls <- (combined_summary$Gesamt_Fouls_Heim + combined_summary$Gesamt_Fouls_Auswärts) / 38
+combined_summary$Durchschnitt_Gelbe_Karten <- (combined_summary$Gesamt_Gelbe_Karten_Heim + combined_summary$Gesamt_Gelbe_Karten_Auswärts) / 38
+
+# Entfernen der nicht mehr benötigten Spalten
+combined_summary <- combined_summary[, -c(2:21)]
+
+# Sortieren der combined_summary-Tabelle nach Punkten und dann nach Tordifferenz absteigend
+combined_summary <- combined_summary %>%
+  arrange(desc(Gesamt_Punkte), desc(Tordiff))
+
+# Zeigen Sie die sortierte Zusammenfassungstabelle an
+print(combined_summary)
+
+```
+
+```{r}
+# Filtern der Spiele von Arsenal und Sortieren nach Datum und Uhrzeit
+arsenal_spiele <- epl %>%
+  filter(Heimteam == "Arsenal" | Auswärtsteam == "Arsenal") %>%
+  arrange(Datum_Uhrzeit) %>%
+  mutate(
+    Spieltag = row_number(),
+    Tore_von_Arsenal = ifelse(Heimteam == "Arsenal", Tore_Heim, Tore_Auswärts),
+    Gegentore_von_Arsenal = ifelse(Heimteam == "Arsenal", Tore_Auswärts, Tore_Heim),
+    Ballbesitz_Arsenal = ifelse(Heimteam == "Arsenal", Ballbesitz_Heim, Ballbesitz_Auswärts),
+    Passgenauigkeit_Arsenal = ifelse(Heimteam == "Arsenal", Passgenauigkeit_Heim, Passgenauigkeit_Auswärts),
+    Tordiff_Arsenal = ifelse(Heimteam == "Arsenal", Tordiff_Heim, Tordiff_Auswärts),
+    Tore_von_Arsenal_versetzt = Tore_von_Arsenal + 0.1,
+    Gegentore_von_Arsenal_versetzt = Gegentore_von_Arsenal - 0.1
+  )
+```
+
+```{r}
+# Erstellen des Scatter-Plots für Ballbesitz vs. geschossene Tore, ohne Legende
+scatter_plot <- ggplot(data = arsenal_spiele, aes(x = Ballbesitz_Arsenal, y = Tordiff_Arsenal)) +
+  geom_point(size = 3, alpha = 0.6, color = "red") +
+  labs(title = "Ballbesitz vs. Tordifferenz von Arsenal",
+       x = "Ballbesitz (%)",
+       y = "Tordifferenz") +
+  theme_minimal()
+
+# Anzeigen des Scatter-Plots
+print(scatter_plot)
+
+# Speichern des Scatter-Plots
+ggsave("arsenal_ballbesitz_vs_tore_simpler.png", plot = scatter_plot, width = 10, height = 8, units = "in")
+```
+```{r}
+# Erstellen des Scatter-Plots für Ballbesitz vs. geschossene Tore, ohne Legende
+scatter_plot <- ggplot(data = arsenal_spiele, aes(x = Passgenauigkeit_Arsenal, y = Tordiff_Arsenal)) +
+  geom_point(size = 3, alpha = 0.6, color = "red") +
+  labs(title = "Passgenauigkeit vs. Tordifferenz von Arsenal",
+       x = "Passgenauigkeit (%)",
+       y = "Tordifferenz") +
+  theme_minimal()
+
+# Anzeigen des Scatter-Plots
+print(scatter_plot)
+
+# Speichern des Scatter-Plots
+ggsave("arsenal_passgenauigkeit_vs_tore_simpler.png", plot = scatter_plot, width = 10, height = 8, units = "in")
+
+```
+
+```{r}
+# Streudiagramm
+ggplot(epl, aes(x = Ballbesitz_Heim, y = Tordiff_Heim)) +
+  geom_point() + # Punkte im Diagramm
+  labs(title = "Korrelation zwischen Ballbesitz_Heim und Tordiff_Heim",
+       x = "Ballbesitz_Heim",
+       y = "Tordifferenz vom Heimteam") +
+  theme_minimal()
+```
+```{r}
+# Sortieren Datensatz nach Ballbesitz_Heim in aufsteigender Reihenfolge
+epl_sorted <- epl[order(epl$Ballbesitz_Auswärts), ]
+
+# Die 10 kleinsten Werte nach Ballbesitz_Heim ausgeben
+head(epl_sorted, 10)
+
+```
+
+```{r}
+ggplot(epl, aes(Passgenauigkeit_Heim, Tordiff_Heim)) +
+  geom_point()
+```
+```{r}
+# Summieren Sie Tore_Heim und Tore_Auswärts, um die Gesamttore pro Spiel zu erhalten
+epl$Gesamt_Tore <- epl$Tore_Heim + epl$Tore_Auswärts
+
+# Erstellen Sie das Histogramm
+histogram <- ggplot(epl, aes(x = Gesamt_Tore)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "black") +
+  labs(title = "Verteilung der Gesamttore pro Spiel in der Premier League",
+       x = "Gesamttore pro Spiel",
+       y = "Anzahl der Spiele") +
+  scale_x_continuous(breaks = seq(min(epl$Gesamt_Tore), max(epl$Gesamt_Tore), by = 1)) +
+  theme_minimal()
+
+# Plot anzeigen
+print(histogram)
+```
+
+```{r}
+# Kombinieren der Heim- und Auswärtsteams in einem neuen Dataframe
+ballbesitz_data <- epl %>%
+  select(Heimteam, Ballbesitz_Heim) %>%
+  rename(Team = Heimteam, Ballbesitz = Ballbesitz_Heim) %>%
+  bind_rows(
+    epl %>%
+      select(Auswärtsteam, Ballbesitz_Auswärts) %>%
+      rename(Team = Auswärtsteam, Ballbesitz = Ballbesitz_Auswärts)
+  )
+
+# Erstellen des kombinierten Boxplots für den Ballbesitz pro Team (Heim und Auswärts)
+ggplot(ballbesitz_data, aes(x = Team, y = Ballbesitz)) +
+  geom_boxplot(fill = "steelblue") +
+  labs(title = "Ballbesitz pro Team (Heim- und Auswärtsspiele kombiniert)",
+       x = "Team",
+       y = "Ballbesitz (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotieren der X-Achsentexte für bessere Lesbarkeit
+
+ballbesitz_data
+```
+```{r}
+ggplot(combined_summary, aes(x = Durchschnitt_Fouls, y = Gesamt_Punkte)) +
+  geom_point(aes(color = Durchschnitt_Gelbe_Karten), size = 4, alpha = 0.8) +
+  geom_text_repel(aes(label = Heimteam), size = 3) +  # Vermeidet Überschneidungen der Labels
+  scale_color_gradient(low = "yellow", high = "red", name = "Durchschnittliche Gelbe Karten") +
+  labs(title = "Zusammenhang zwischen Fouls, Gelben Karten und Punkten in der Premier League",
+       x = "Durchschnittliche Fouls pro Spiel",
+       y = "Gesamtpunkte") +
+  theme_minimal()
+```
+```{r}
+fouls_gelbe_punkte <- combined_summary %>%
+  select(Heimteam, Durchschnitt_Fouls, Durchschnitt_Gelbe_Karten, Gesamt_Punkte)
+
+# Tabelle anzeigen
+print(fouls_gelbe_punkte)
+```
+
+```{r}
+# Erstellen des Plots mit optimierten Linien und Punkten
+plot <- ggplot(data = arsenal_spiele, aes(x = Spieltag)) +
+  geom_line(aes(y = Tore_von_Arsenal_versetzt, colour = "Geschossene Tore"), size = 0.5, alpha = 0.6) + # Etwas dickere Linien für bessere Glätte
+  geom_point(aes(y = Tore_von_Arsenal_versetzt, colour = "Geschossene Tore"), size = 1.5, alpha = 0.6) + # Kleinere Punkte, aber nicht zu klein
+  geom_line(aes(y = Gegentore_von_Arsenal, colour = "Gegentore"), size = 0.5, alpha = 0.6) +
+  geom_point(aes(y = Gegentore_von_Arsenal, colour = "Gegentore"), size = 1.5, alpha = 0.6) +
+  scale_colour_manual(name = "Legende", values = c("Geschossene Tore" = "red", "Gegentore" = "blue")) +
+  labs(title = "Tore und Gegentore von Arsenal pro Spieltag", x = "Spieltag", y = "Anzahl der Tore") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10, hjust = 0.5), # Kleinerer, zentrierter Titel
+    axis.title.x = element_text(size = 8), # Kleinere Achsentitel
+    axis.title.y = element_text(size = 8),
+    axis.text = element_text(size = 8), # Kleinere Achsentext
+    legend.title = element_text(size = 8), # Kleinerer Legendentitel
+    legend.text = element_text(size = 8), # Kleineren Legendeneintragtext
+    legend.position = "bottom", # Legende unten
+    legend.box = "horizontal", # Legende horizontal anordnen
+    panel.grid.major = element_line(size = 0.3), # Gitterlinien etwas dünner
+    panel.grid.minor = element_line(size = 0.15) # Kleinere Gitterlinien auch dünner
+  )
+
+# Anzeigen des Plots
+print(plot)
+
+# Speichern des Plots
+ggsave("arsenal_tore_und_gegentore_versetzt_kleiner_glatt.png", plot = plot, width = 14, height = 7, units = "in") # Kleinere Grafik speichern
+
+```
+
+```{r}
+# Erstellen des Plots mit grauen Punkten ohne Verbindungslinien
+plot <- ggplot(data = arsenal_spiele, aes(x = Spieltag)) +
+  geom_point(aes(y = Tore_von_Arsenal_versetzt), size = 1.5, alpha = 0.6, color = "gray") + # Punkte für geschossene Tore, in Grau
+  geom_point(aes(y = Gegentore_von_Arsenal), size = 1.5, alpha = 0.6, color = "darkgray") + # Punkte für Gegentore, in dunklerem Grau
+  labs(title = "Tore und Gegentore von Arsenal pro Spieltag", x = "Spieltag", y = "Anzahl der Tore") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10, hjust = 0.5), # Kleinerer, zentrierter Titel
+    axis.title.x = element_text(size = 8), # Kleinere Achsentitel
+    axis.title.y = element_text(size = 8),
+    axis.text = element_text(size = 8), # Kleinere Achsentext
+    legend.position = "none", # Keine Legende anzeigen
+    panel.grid.major = element_line(size = 0.3), # Gitterlinien etwas dünner
+    panel.grid.minor = element_line(size = 0.15) # Kleinere Gitterlinien auch dünner
+  )
+
+# Anzeigen des Plots
+print(plot)
+
+# Speichern des Plots
+ggsave("arsenal_tore_und_gegentore_grau_punkte.png", plot = plot, width = 14, height = 7, units = "in", dpi = 300) # Kleinere Grafik speichern
+
+```
+```{r}
+# Top 3 und schlechteste 3 nach Gesamtpunkten
+top_punkte <- combined_summary %>% arrange(desc(Gesamt_Punkte)) %>% head(3)
+bottom_punkte <- combined_summary %>% arrange(Gesamt_Punkte) %>% head(3)
+
+# Top 3 und schlechteste 3 nach Tordifferenz
+top_tordiff <- combined_summary %>% arrange(desc(Tordiff)) %>% head(3)
+bottom_tordiff <- combined_summary %>% arrange(Tordiff) %>% head(3)
+
+# Top 3 und schlechteste 3 nach durchschnittlichem Ballbesitz
+top_ballbesitz <- combined_summary %>% arrange(desc(Durchschnitt_Ballbesitz)) %>% head(3)
+bottom_ballbesitz <- combined_summary %>% arrange(Durchschnitt_Ballbesitz) %>% head(3)
+
+# Top 3 und schlechteste 3 nach durchschnittlicher Passgenauigkeit
+top_passgenauigkeit <- combined_summary %>% arrange(desc(Durchschnitt_Passgenauigkeit)) %>% head(3)
+bottom_passgenauigkeit <- combined_summary %>% arrange(Durchschnitt_Passgenauigkeit) %>% head(3)
+
+# Zusammenfassen der Ergebnisse in eine Übersicht
+summary_table <- rbind(
+  data.frame(Kategorie = "Punkte - Top 3", top_punkte),
+  data.frame(Kategorie = "Punkte - Schlechteste 3", bottom_punkte),
+  data.frame(Kategorie = "Tordifferenz - Top 3", top_tordiff),
+  data.frame(Kategorie = "Tordifferenz - Schlechteste 3", bottom_tordiff),
+  data.frame(Kategorie = "Ballbesitz - Top 3", top_ballbesitz),
+  data.frame(Kategorie = "Ballbesitz - Schlechteste 3", bottom_ballbesitz),
+  data.frame(Kategorie = "Passgenauigkeit - Top 3", top_passgenauigkeit),
+  data.frame(Kategorie = "Passgenauigkeit - Schlechteste 3", bottom_passgenauigkeit)
+)
+
+# Ausgabe der Tabelle
+print(summary_table)
+```
+
+
+```{r}
+# Plot für Gesamtpunkte
+punkte_plot <- ggplot(rbind(top_punkte, bottom_punkte), aes(x = reorder(Heimteam, Gesamt_Punkte), y = Gesamt_Punkte, fill = Gesamt_Punkte)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Top 3 und schlechteste 3 Teams nach Gesamtpunkten", x = "Team", y = "Punkte") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Entfernt die Legende
+
+# Plot für Tordifferenz
+tordiff_plot <- ggplot(rbind(top_tordiff, bottom_tordiff), aes(x = reorder(Heimteam, Tordiff), y = Tordiff, fill = Tordiff)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Top 3 und schlechteste 3 Teams nach Tordifferenz", x = "Team", y = "Tordifferenz") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Entfernt die Legende
+
+# Plot für Durchschnittlichen Ballbesitz
+ballbesitz_plot <- ggplot(rbind(top_ballbesitz, bottom_ballbesitz), aes(x = reorder(Heimteam, Durchschnitt_Ballbesitz), y = Durchschnitt_Ballbesitz, fill = Durchschnitt_Ballbesitz)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Top 3 und schlechteste 3 Teams nach Ballbesitz", x = "Team", y = "Ballbesitz (%)") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Entfernt die Legende
+
+# Plot für Durchschnittliche Passgenauigkeit
+passgenauigkeit_plot <- ggplot(rbind(top_passgenauigkeit, bottom_passgenauigkeit), aes(x = reorder(Heimteam, Durchschnitt_Passgenauigkeit), y = Durchschnitt_Passgenauigkeit, fill = Durchschnitt_Passgenauigkeit)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Top 3 und schlechteste 3 Teams nach Passgenauigkeit", x = "Team", y = "Passgenauigkeit (%)") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Entfernt die Legende
+
+# Plots anzeigen
+print(punkte_plot)
+print(tordiff_plot)
+print(ballbesitz_plot)
+print(passgenauigkeit_plot)
+
+
+```
+```{r}
+library(ggrepel)
+
+scatter_plot <- ggplot(combined_summary, aes(x = Durchschnitt_Passgenauigkeit, y = Gesamt_Punkte)) +
+  geom_point() +
+  geom_text_repel(aes(label = Heimteam), box.padding = 0.5) +
+  labs(
+    title = "Passgenauigkeit vs. Gesamtpunkte pro Team",
+    x = "Durchschnittliche Passgenauigkeit",
+    y = "Gesamtpunkte"
+  ) +
+  theme_minimal()
+
+print(scatter_plot)
+
+
+```
+
+```{r}
+extract_team_data <- function(team_name, df) {
+  team_data <- df %>%
+    filter(Heimteam == team_name | Auswärtsteam == team_name) %>%
+    mutate(
+      Gegner = ifelse(Heimteam == team_name, Auswärtsteam, Heimteam), 
+      Tore = ifelse(Heimteam == team_name, Tore_Heim, Tore_Auswärts),
+      Gegentore = ifelse(Heimteam == team_name, Tore_Auswärts, Tore_Heim),
+      Ballbesitz = ifelse(Heimteam == team_name, Ballbesitz_Heim, Ballbesitz_Auswärts),
+      Schüsse = ifelse(Heimteam == team_name, Schüsse_Heim, Schüsse_Auswärts),
+      Torschüsse = ifelse(Heimteam == team_name, Torschüsse_Heim, Torschüsse_Auswärts),
+      Fehlschüsse = ifelse(Heimteam == team_name, Fehlschüsse_Heim, Fehlschüsse_Auswärts),
+      Blockiert = ifelse(Heimteam == team_name, Blockiert_Heim, Blockiert_Auswärts),
+      Passgenauigkeit = ifelse(Heimteam == team_name, Passgenauigkeit_Heim, Passgenauigkeit_Auswärts),
+      Chancen = ifelse(Heimteam == team_name, Chancen_Heim, Chancen_Auswärts),
+      Ecken = ifelse(Heimteam == team_name, Ecken_Heim, Ecken_Auswärts),
+      Abseits = ifelse(Heimteam == team_name, Abseits_Heim, Abseits_Auswärts),
+      Tackles = ifelse(Heimteam == team_name, Tackles_Heim, Tackles_Auswärts),
+      Duelle = ifelse(Heimteam == team_name, Duelle_Heim, Duelle_Auswärts),
+      Paraden = ifelse(Heimteam == team_name, Paraden_Heim, Paraden_Auswärts),
+      Fouls = ifelse(Heimteam == team_name, Fouls_Heim, Fouls_Auswärts),
+      Gelbe_Karten = ifelse(Heimteam == team_name, Gelbe_Karten_Heim, Gelbe_Karten_Auswärts),
+      Rote_Karten = ifelse(Heimteam == team_name, Rote_Karten_Heim, Rote_Karten_Auswärts),
+      Tordifferenz = Tore - Gegentore,  # Tordifferenz berechnen
+      Ergebnis = case_when(
+        Tordifferenz > 0 ~ "Sieg",
+        Tordifferenz == 0 ~ "Unentschieden",
+        Tordifferenz < 0 ~ "Niederlage"
+      ),
+      Spieltyp = ifelse(Heimteam == team_name, "Heim", "Auswärts"),
+      Runde = ifelse(Datum_Uhrzeit < as.POSIXct("2023-01-01"), "Hinrunde", "Rückrunde")
+    ) %>%
+    select(-contains("Heim"), -contains("Auswärts"))  # Entfernen der Heim/Auswärts-spezifischen Spalten
+
+  return(team_data)
+}
+
+# Anwendung der Funktion auf Arsenal
+arsenal_data <- extract_team_data("Arsenal", epl)
+head(arsenal_data)
+```
+
+
+```{r}
+# Beispielplot: Passgenauigkeit über die Zeit, Linie durchgehend, Punkte nach Ergebnis eingefärbt
+ggplot(arsenal_data, aes(x = Datum_Uhrzeit, y = Passgenauigkeit)) +
+  geom_line(color = "black", size = 0.5) +  # Linie in einer festen Farbe (schwarz)
+  geom_point(aes(color = Ergebnis), size = 3) +  # Punkte nach Ergebnis eingefärbt
+  labs(title = "Passgenauigkeit von Arsenal pro Spiel",
+       x = "Datum",
+       y = "Passgenauigkeit (%)",
+       color = "Ergebnis") +
+  theme_minimal()
+
+# Beispielplot: Ballbesitz über die Zeit, Linie durchgehend, Punkte nach Ergebnis eingefärbt
+ggplot(arsenal_data, aes(x = Datum_Uhrzeit, y = Ballbesitz)) +
+  geom_line(color = "black", size = 0.5) +  # Linie in einer festen Farbe (schwarz)
+  geom_point(aes(color = Ergebnis), size = 3) +  # Punkte nach Ergebnis eingefärbt
+  labs(title = "Ballbesitz von Arsenal pro Spiel",
+       x = "Datum",
+       y = "Ballbesitz (%)",
+       color = "Ergebnis") +
+  theme_minimal()
+
+# Beispielplot: Tackles über die Zeit, Linie durchgehend, Punkte nach Ergebnis eingefärbt
+ggplot(arsenal_data, aes(x = Datum_Uhrzeit, y = Fouls)) +
+  geom_line(color = "black", size = 0.5) +  # Linie in einer festen Farbe (schwarz)
+  geom_point(aes(color = Ergebnis), size = 3) +  # Punkte nach Ergebnis eingefärbt
+  labs(title = "Fouls von Arsenal pro Spiel",
+       x = "Datum",
+       y = "Fouls",
+       color = "Ergebnis") +
+  theme_minimal()
+
+# Beispielplot: Tackles über die Zeit, Linie durchgehend, Punkte nach Ergebnis eingefärbt
+ggplot(arsenal_data, aes(x = Datum_Uhrzeit, y = Tackles)) +
+  geom_line(color = "black", size = 0.5) +  # Linie in einer festen Farbe (schwarz)
+  geom_point(aes(color = Ergebnis), size = 3) +  # Punkte nach Ergebnis eingefärbt
+  labs(title = "Erfolgsrate Tackles von Arsenal pro Spiel",
+       x = "Datum",
+       y = "Tackles (%)",
+       color = "Ergebnis") +
+  theme_minimal()
+
+```
+```{r}
+ggplot(arsenal_data, aes(x = Datum_Uhrzeit, y = Ballbesitz)) +
+  geom_line(color = "black", size = 0.5) +  # Linie in Schwarz
+  geom_point(color = "black", size = 3) +  # Punkte ebenfalls in Schwarz
+  labs(title = "Ballbesitz von Arsenal pro Spiel",
+       x = "Datum",
+       y = "Ballbesitz (%)") +
+  theme_minimal()
+
+ggplot(arsenal_data, aes(x = Datum_Uhrzeit, y = Ballbesitz)) +
+  geom_line(color = "black", size = 0.5) +  # Linie in Schwarz
+  geom_point(aes(color = Ergebnis), size = 3) +  # Punkte nach Ergebnis eingefärbt
+  labs(title = "Ballbesitz von Arsenal pro Spiel",
+       x = "Datum",
+       y = "Ballbesitz (%)",
+       color = "Ergebnis") +
+  theme_minimal()
+
+ggplot(arsenal_data, aes(x = Datum_Uhrzeit, y = Ballbesitz)) +
+  geom_line(color = "black", size = 0.5) +  # Linie in Schwarz
+  geom_point(aes(color = Ergebnis, size = Tackles), alpha = 0.7) +  # Punkte nach Ergebnis eingefärbt und nach Tacklingrate skaliert
+  labs(title = "Ballbesitz von Arsenal pro Spiel",
+       x = "Datum",
+       y = "Ballbesitz (%)",
+       color = "Ergebnis",
+       size = "Tackling Erfolgsrate (%)") +
+  theme_minimal()
+
+ggplot(arsenal_data, aes(x = Datum_Uhrzeit, y = Ballbesitz)) +
+  geom_line(color = "black", size = 0.5) +  # Linie durchgehend in Schwarz
+  geom_point(aes(shape = Spieltyp, color = Ergebnis, size = Tackles), alpha = 0.7) +  # Punkte nach Form für Heim/Auswärts und Farbe nach Ergebnis
+  labs(title = "Ballbesitz von Arsenal pro Spiel",
+       x = "Datum",
+       y = "Ballbesitz (%)",
+       shape = "Spieltyp",  # Formen für Heim/Auswärts
+       color = "Ergebnis",
+       size = "Tackling Erfolgsrate (%)") +
+  theme_minimal()
+```
+
